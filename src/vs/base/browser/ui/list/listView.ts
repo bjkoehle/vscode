@@ -13,6 +13,30 @@ import { ScrollEvent, ScrollbarVisibility } from 'vs/base/common/scrollable';
 import { RangeMap, IRange, relativeComplement, each } from './rangeMap';
 import { IDelegate, IRenderer } from './list';
 import { RowCache, IRow } from './rowCache';
+import { isWindows } from 'vs/base/common/platform';
+import * as browser from 'vs/base/browser/browser';
+
+function canUseTranslate3d(): boolean {
+	if (browser.isFirefox) {
+		return false;
+	}
+
+	if (browser.getZoomLevel() !== 0) {
+		return false;
+	}
+
+	// see https://github.com/Microsoft/vscode/issues/24483
+	if (browser.isChromev56) {
+		const pixelRatio = browser.getPixelRatio();
+		if (Math.floor(pixelRatio) !== pixelRatio) {
+			// Not an integer
+			return false;
+		}
+	}
+
+	return true;
+}
+
 
 interface IItem<T> {
 	id: string;
@@ -30,7 +54,8 @@ const MouseEventTypes = [
 	'mouseover',
 	'mousemove',
 	'mouseout',
-	'contextmenu'
+	'contextmenu',
+	'touchstart'
 ];
 
 export interface IListViewOptions {
@@ -65,7 +90,7 @@ export class ListView<T> implements IDisposable {
 		this.items = [];
 		this.itemId = 0;
 		this.rangeMap = new RangeMap();
-		this.renderers = toObject<IRenderer<T, any>, IRenderer<T, any>>(renderers, r => r.templateId);
+		this.renderers = toObject<IRenderer<T, any>>(renderers, r => r.templateId);
 		this.cache = new RowCache(this.renderers);
 
 		this.lastRenderTop = 0;
@@ -79,7 +104,6 @@ export class ListView<T> implements IDisposable {
 		this.gesture = new Gesture(this.rowsContainer);
 
 		this.scrollableElement = new ScrollableElement(this.rowsContainer, {
-			canUseTranslate3d: false,
 			alwaysConsumeMouseWheel: true,
 			horizontal: ScrollbarVisibility.Hidden,
 			vertical: ScrollbarVisibility.Auto,
@@ -122,7 +146,7 @@ export class ListView<T> implements IDisposable {
 
 		const scrollHeight = this.getContentHeight();
 		this.rowsContainer.style.height = `${scrollHeight}px`;
-		this.scrollableElement.updateState({ scrollHeight });
+		this.scrollableElement.setScrollDimensions({ scrollHeight });
 
 		return deleted.map(i => i.element);
 	}
@@ -132,8 +156,8 @@ export class ListView<T> implements IDisposable {
 	}
 
 	get renderHeight(): number {
-		const scrollState = this.scrollableElement.getScrollState();
-		return scrollState.height;
+		const scrollDimensions = this.scrollableElement.getScrollDimensions();
+		return scrollDimensions.height;
 	}
 
 	element(index: number): T {
@@ -162,7 +186,7 @@ export class ListView<T> implements IDisposable {
 	}
 
 	layout(height?: number): void {
-		this.scrollableElement.updateState({
+		this.scrollableElement.setScrollDimensions({
 			height: height || DOM.getContentHeight(this._domNode)
 		});
 	}
@@ -179,9 +203,14 @@ export class ListView<T> implements IDisposable {
 		rangesToInsert.forEach(range => each(range, i => this.insertItemInDOM(this.items[i], i)));
 		rangesToRemove.forEach(range => each(range, i => this.removeItemFromDOM(this.items[i])));
 
-		const transform = `translate3d(0px, -${renderTop}px, 0px)`;
-		this.rowsContainer.style.transform = transform;
-		this.rowsContainer.style.webkitTransform = transform;
+		if (canUseTranslate3d() && !isWindows /* Windows: translate3d breaks subpixel-antialias (ClearType) unless a background is defined */) {
+			const transform = `translate3d(0px, -${renderTop}px, 0px)`;
+			this.rowsContainer.style.transform = transform;
+			this.rowsContainer.style.webkitTransform = transform;
+		} else {
+			this.rowsContainer.style.top = `-${renderTop}px`;
+		}
+
 		this.lastRenderTop = renderTop;
 		this.lastRenderHeight = renderHeight;
 	}
@@ -214,12 +243,12 @@ export class ListView<T> implements IDisposable {
 	}
 
 	getScrollTop(): number {
-		const scrollState = this.scrollableElement.getScrollState();
-		return scrollState.scrollTop;
+		const scrollPosition = this.scrollableElement.getScrollPosition();
+		return scrollPosition.scrollTop;
 	}
 
 	setScrollTop(scrollTop: number): void {
-		this.scrollableElement.updateState({ scrollTop });
+		this.scrollableElement.setScrollPosition({ scrollTop });
 	}
 
 	get scrollTop(): number {

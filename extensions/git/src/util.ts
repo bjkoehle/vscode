@@ -8,6 +8,7 @@
 import { Event } from 'vscode';
 import { dirname } from 'path';
 import * as fs from 'fs';
+import * as byline from 'byline';
 
 export function log(...args: any[]): void {
 	console.log.apply(console, ['git:', ...args]);
@@ -53,10 +54,10 @@ export function anyEvent<T>(...events: Event<T>[]): Event<T> {
 }
 
 export function done<T>(promise: Promise<T>): Promise<void> {
-	return promise.then<void>(() => void 0, () => void 0);
+	return promise.then<void>(() => void 0);
 }
 
-export function once<T>(event: Event<T>): Event<T> {
+export function onceEvent<T>(event: Event<T>): Event<T> {
 	return (listener, thisArgs = null, disposables?) => {
 		const result = event(e => {
 			result.dispose();
@@ -68,10 +69,21 @@ export function once<T>(event: Event<T>): Event<T> {
 }
 
 export function eventToPromise<T>(event: Event<T>): Promise<T> {
-	return new Promise(c => once(event)(c));
+	return new Promise<T>(c => onceEvent(event)(c));
 }
 
-// TODO@Joao: replace with Object.assign
+export function once(fn: (...args: any[]) => any): (...args: any[]) => any {
+	let didRun = false;
+
+	return (...args) => {
+		if (didRun) {
+			return;
+		}
+
+		return fn(...args);
+	};
+}
+
 export function assign<T>(destination: T, ...sources: any[]): T {
 	for (const source of sources) {
 		Object.keys(source).forEach(key => destination[key] = source[key]);
@@ -104,11 +116,11 @@ export function groupBy<T>(arr: T[], fn: (el: T) => string): { [key: string]: T[
 }
 
 export function denodeify<R>(fn: Function): (...args) => Promise<R> {
-	return (...args) => new Promise((c, e) => fn(...args, (err, r) => err ? e(err) : c(r)));
+	return (...args) => new Promise<R>((c, e) => fn(...args, (err, r) => err ? e(err) : c(r)));
 }
 
 export function nfcall<R>(fn: Function, ...args): Promise<R> {
-	return new Promise((c, e) => fn(...args, (err, r) => err ? e(err) : c(r)));
+	return new Promise<R>((c, e) => fn(...args, (err, r) => err ? e(err) : c(r)));
 }
 
 export async function mkdirp(path: string, mode?: number): Promise<boolean> {
@@ -147,4 +159,50 @@ export async function mkdirp(path: string, mode?: number): Promise<boolean> {
 	}
 
 	return true;
+}
+
+export function uniqueFilter<T>(keyFn: (t: T) => string): (t: T) => boolean {
+	const seen: { [key: string]: boolean; } = Object.create(null);
+
+	return element => {
+		const key = keyFn(element);
+
+		if (seen[key]) {
+			return false;
+		}
+
+		seen[key] = true;
+		return true;
+	};
+}
+
+export function find<T>(array: T[], fn: (t: T) => boolean): T | undefined {
+	let result: T | undefined = undefined;
+
+	array.some(e => {
+		if (fn(e)) {
+			result = e;
+			return true;
+		}
+
+		return false;
+	});
+
+	return result;
+}
+
+export async function grep(filename: string, pattern: RegExp): Promise<boolean> {
+	return new Promise<boolean>((c, e) => {
+		const fileStream = fs.createReadStream(filename, { encoding: 'utf8' });
+		const stream = byline(fileStream);
+		stream.on('data', (line: string) => {
+			if (pattern.test(line)) {
+				fileStream.close();
+				c(true);
+			}
+		});
+
+		stream.on('error', e);
+		stream.on('end', () => c(false));
+	});
 }

@@ -5,7 +5,7 @@
 
 'use strict';
 
-import { createDecorator, ServiceIdentifier } from 'vs/platform/instantiation/common/instantiation';
+import { createDecorator, ServiceIdentifier, ServicesAccessor } from 'vs/platform/instantiation/common/instantiation';
 import { Position, IEditorInput } from 'vs/platform/editor/common/editor';
 import { IEditorStacksModel, IEditorGroup } from 'vs/workbench/common/editor';
 import Event from 'vs/base/common/event';
@@ -19,11 +19,12 @@ export type GroupOrientation = 'vertical' | 'horizontal';
 
 export const IEditorGroupService = createDecorator<IEditorGroupService>('editorGroupService');
 
-export interface ITabOptions {
+export interface IEditorTabOptions {
 	showTabs?: boolean;
 	tabCloseButton?: 'left' | 'right' | 'off';
 	showIcons?: boolean;
 	previewEditors?: boolean;
+	labelFormat?: 'default' | 'short' | 'medium' | 'long';
 }
 
 export interface IMoveOptions {
@@ -62,7 +63,7 @@ export interface IEditorGroupService {
 	/**
 	 * Emitted when tab options changed.
 	 */
-	onTabOptionsChanged: Event<ITabOptions>;
+	onTabOptionsChanged: Event<IEditorTabOptions>;
 
 	/**
 	 * Keyboard focus the editor group at the provided position.
@@ -99,6 +100,11 @@ export interface IEditorGroupService {
 	getGroupOrientation(): GroupOrientation;
 
 	/**
+	 * Resize visible editor groups
+	 */
+	resizeGroup(position: Position, groupSizeChange: number): void;
+
+	/**
 	 * Adds the pinned state to an editor, removing it from being a preview editor.
 	 */
 	pinEditor(group: IEditorGroup, input: IEditorInput): void;
@@ -125,5 +131,10 @@ export interface IEditorGroupService {
 	/**
 	 * Returns tab options.
 	 */
-	getTabOptions(): ITabOptions;
+	getTabOptions(): IEditorTabOptions;
+
+	/**
+	 * Invoke a function in the context of the active editor.
+	 */
+	invokeWithinEditorContext<T>(fn: (accessor: ServicesAccessor) => T): T;
 }

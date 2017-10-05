@@ -125,9 +125,15 @@ function getNodeCachedDataDir() {
 		return Promise.resolve(undefined);
 	}
 
-	var dir = path.join(app.getPath('userData'), 'CachedData');
+	// find commit id
+	var productJson = require(path.join(__dirname, '../product.json'));
+	if (!productJson.commit) {
+		return Promise.resolve(undefined);
+	}
 
-	return mkdirp(dir).then(undefined, function (err) { /*ignore*/ });
+	var dir = path.join(app.getPath('userData'), 'CachedData', productJson.commit);
+
+	return mkdirp(dir).then(undefined, function () { /*ignore*/ });
 }
 
 function mkdirp(dir) {
@@ -201,7 +207,12 @@ global.getOpenUrls = function () {
 // node/v8 cached data.
 var nodeCachedDataDir = getNodeCachedDataDir().then(function (value) {
 	if (value) {
+		// store the data directory
 		process.env['VSCODE_NODE_CACHED_DATA_DIR_' + process.pid] = value;
+
+		// tell v8 to not be lazy when parsing JavaScript. Generally this makes startup slower
+		// but because we generate cached data it makes subsequent startups much faster
+		app.commandLine.appendSwitch('--js-flags', '--nolazy');
 	}
 });
 

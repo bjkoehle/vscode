@@ -11,13 +11,12 @@ import { TPromise } from 'vs/base/common/winjs.base';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { TextFileEditorModelManager } from 'vs/workbench/services/textfile/common/textFileEditorModelManager';
 import { join } from 'vs/base/common/paths';
-import { workbenchInstantiationService, TestEditorGroupService, createFileInput, TestFileService } from 'vs/workbench/test/workbenchTestServices';
+import { workbenchInstantiationService, TestEditorGroupService, TestFileService } from 'vs/workbench/test/workbenchTestServices';
 import { onError } from 'vs/base/test/common/utils';
 import { IEditorGroupService } from 'vs/workbench/services/group/common/groupService';
 import { TextFileEditorModel } from 'vs/workbench/services/textfile/common/textFileEditorModel';
 import { IFileService, FileChangesEvent, FileChangeType } from 'vs/platform/files/common/files';
 import { IModelService } from 'vs/editor/common/services/modelService';
-import { isLinux } from 'vs/base/common/platform';
 
 export class TestTextFileEditorModelManager extends TextFileEditorModelManager {
 
@@ -65,11 +64,7 @@ suite('Files - TextFileEditorModelManager', () => {
 		assert(!manager.get(URI.file('foo')));
 		assert.strictEqual(manager.get(URI.file('/test.html')), model1);
 
-		if (isLinux) {
-			assert.ok(!manager.get(fileUpper));
-		} else {
-			assert.strictEqual(manager.get(fileUpper), model1);
-		}
+		assert.ok(!manager.get(fileUpper));
 
 		let result = manager.getAll();
 		assert.strictEqual(3, result.length);
@@ -84,11 +79,7 @@ suite('Files - TextFileEditorModelManager', () => {
 		assert.strictEqual(1, result.length);
 
 		result = manager.getAll(fileUpper);
-		if (isLinux) {
-			assert.strictEqual(0, result.length);
-		} else {
-			assert.strictEqual(1, result.length);
-		}
+		assert.strictEqual(0, result.length);
 
 		manager.remove(URI.file(''));
 
@@ -101,11 +92,7 @@ suite('Files - TextFileEditorModelManager', () => {
 
 		manager.remove(fileUpper);
 		result = manager.getAll();
-		if (isLinux) {
-			assert.strictEqual(2, result.length);
-		} else {
-			assert.strictEqual(1, result.length);
-		}
+		assert.strictEqual(2, result.length);
 
 		manager.clear();
 		result = manager.getAll();
@@ -121,17 +108,17 @@ suite('Files - TextFileEditorModelManager', () => {
 		const resource = URI.file('/test.html');
 		const encoding = 'utf8';
 
-		manager.loadOrCreate(resource, encoding, true).done(model => {
+		manager.loadOrCreate(resource, { encoding, reload: true }).done(model => {
 			assert.ok(model);
 			assert.equal(model.getEncoding(), encoding);
 			assert.equal(manager.get(resource), model);
 
-			return manager.loadOrCreate(resource, encoding).then(model2 => {
+			return manager.loadOrCreate(resource, { encoding }).then(model2 => {
 				assert.equal(model2, model);
 
 				model.dispose();
 
-				return manager.loadOrCreate(resource, encoding).then(model3 => {
+				return manager.loadOrCreate(resource, { encoding }).then(model3 => {
 					assert.notEqual(model3, model2);
 					assert.equal(manager.get(resource), model3);
 
@@ -161,34 +148,6 @@ suite('Files - TextFileEditorModelManager', () => {
 
 		model2.dispose();
 		model3.dispose();
-	});
-
-	test('disposes model when not open anymore', function () {
-		const manager: TestTextFileEditorModelManager = instantiationService.createInstance(TestTextFileEditorModelManager);
-
-		const resource = toResource('/path/index.txt');
-
-		const model: TextFileEditorModel = instantiationService.createInstance(TextFileEditorModel, resource, 'utf8');
-		manager.add(resource, model);
-
-		const input = createFileInput(instantiationService, resource);
-
-		const stacks = accessor.editorGroupService.getStacksModel();
-		const group = stacks.openGroup('group', true);
-		group.openEditor(input);
-
-		accessor.editorGroupService.fireChange();
-
-		assert.ok(!model.isDisposed());
-
-		group.closeEditor(input);
-		accessor.editorGroupService.fireChange();
-		assert.ok(model.isDisposed());
-
-		model.dispose();
-		assert.ok(!accessor.modelService.getModel(model.getResource()));
-
-		manager.dispose();
 	});
 
 	test('events', function (done) {
@@ -248,11 +207,11 @@ suite('Files - TextFileEditorModelManager', () => {
 			disposeCounter++;
 		});
 
-		manager.loadOrCreate(resource1, 'utf8').done(model1 => {
+		manager.loadOrCreate(resource1, { encoding: 'utf8' }).done(model1 => {
 			accessor.fileService.fireFileChanges(new FileChangesEvent([{ resource: resource1, type: FileChangeType.DELETED }]));
 			accessor.fileService.fireFileChanges(new FileChangesEvent([{ resource: resource1, type: FileChangeType.ADDED }]));
 
-			return manager.loadOrCreate(resource2, 'utf8').then(model2 => {
+			return manager.loadOrCreate(resource2, { encoding: 'utf8' }).then(model2 => {
 				model1.textEditorModel.setValue('changed');
 				model1.updatePreferredEncoding('utf16');
 
@@ -317,8 +276,8 @@ suite('Files - TextFileEditorModelManager', () => {
 			assert.equal(e[0].resource.toString(), resource1.toString());
 		});
 
-		manager.loadOrCreate(resource1, 'utf8').done(model1 => {
-			return manager.loadOrCreate(resource2, 'utf8').then(model2 => {
+		manager.loadOrCreate(resource1, { encoding: 'utf8' }).done(model1 => {
+			return manager.loadOrCreate(resource2, { encoding: 'utf8' }).then(model2 => {
 				model1.textEditorModel.setValue('changed');
 				model1.updatePreferredEncoding('utf16');
 
@@ -355,11 +314,32 @@ suite('Files - TextFileEditorModelManager', () => {
 
 		const resource = toResource('/path/index_something.txt');
 
-		manager.loadOrCreate(resource, 'utf8').done(model => {
+		manager.loadOrCreate(resource, { encoding: 'utf8' }).done(model => {
 			model.dispose();
 
 			assert.ok(!manager.get(resource));
 			assert.ok(!accessor.modelService.getModel(model.getResource()));
+
+			manager.dispose();
+			done();
+		}, error => onError(error, done));
+	});
+
+	test('dispose prevents dirty model from getting disposed', function (done) {
+		const manager: TestTextFileEditorModelManager = instantiationService.createInstance(TestTextFileEditorModelManager);
+
+		const resource = toResource('/path/index_something.txt');
+
+		manager.loadOrCreate(resource, { encoding: 'utf8' }).done((model: TextFileEditorModel) => {
+			model.textEditorModel.setValue('make dirty');
+
+			manager.disposeModel(model);
+			assert.ok(!model.isDisposed());
+
+			model.revert(true);
+
+			manager.disposeModel(model);
+			assert.ok(model.isDisposed());
 
 			manager.dispose();
 			done();

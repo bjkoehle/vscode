@@ -45,7 +45,7 @@ export function stopProfiling(dir: string, prefix: string): TPromise<string> {
 	});
 }
 
-function removePiiPaths(profile: Profile) {
+export function removePiiPaths(profile: Profile) {
 	const stack = [profile.head];
 	while (stack.length > 0) {
 		const element = stack.pop();
@@ -62,18 +62,18 @@ function removePiiPaths(profile: Profile) {
 }
 
 declare interface Profiler {
-	startProfiling(name: string);
+	startProfiling(name: string): void;
 	stopProfiling(): Profile;
 }
 
-declare interface Profile {
+export declare interface Profile {
 	title: string;
-	export(callback: (err, data) => void);
-	delete();
+	export(callback: (err, data) => void): void;
+	delete(): void;
 	head: ProfileSample;
 }
 
-declare interface ProfileSample {
+export declare interface ProfileSample {
 	// bailoutReason:""
 	// callUID:2333
 	// children:Array[39]
@@ -91,7 +91,7 @@ const lazyV8Profiler = new class {
 	private _value: TPromise<Profiler>;
 	get value() {
 		if (!this._value) {
-			this._value = new TPromise((resolve, reject) => {
+			this._value = new TPromise<Profiler>((resolve, reject) => {
 				require(['v8-profiler'], resolve, reject);
 			});
 		}

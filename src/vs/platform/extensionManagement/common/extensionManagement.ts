@@ -74,10 +74,15 @@ export interface ITheme {
 	label: string;
 }
 
-export interface ITreeExplorer {
-	treeExplorerNodeProviderId: string;
-	treeLabel: string;
-	icon: string;
+export interface IView {
+	id: string;
+	name: string;
+}
+
+export interface IColor {
+	id: string;
+	description: string;
+	defaults: { light: string, dark: string, highContrast: string };
 }
 
 export interface IExtensionContributions {
@@ -91,7 +96,9 @@ export interface IExtensionContributions {
 	menus?: { [context: string]: IMenu[] };
 	snippets?: ISnippet[];
 	themes?: ITheme[];
-	explorer?: ITreeExplorer;
+	iconThemes?: ITheme[];
+	views?: { [location: string]: IView[] };
+	colors: IColor[];
 }
 
 export interface IExtensionManifest {
@@ -144,6 +151,7 @@ export interface IGalleryExtension {
 	ratingCount: number;
 	assets: IGalleryExtensionAssets;
 	properties: IGalleryExtensionProperties;
+	telemetryData: any;
 }
 
 export interface IGalleryMetadata {
@@ -177,7 +185,8 @@ export enum SortBy {
 	PublisherName = 3,
 	InstallCount = 4,
 	PublishedDate = 5,
-	AverageRating = 6
+	AverageRating = 6,
+	WeightedRating = 12
 }
 
 export enum SortOrder {
@@ -193,14 +202,19 @@ export interface IQueryOptions {
 	pageSize?: number;
 	sortBy?: SortBy;
 	sortOrder?: SortOrder;
+	source?: string;
+}
+
+export enum StatisticType {
+	Uninstall = 'uninstall'
 }
 
 export interface IExtensionGalleryService {
 	_serviceBrand: any;
 	isEnabled(): boolean;
-	getRequestHeaders(): TPromise<{ [key: string]: string; }>;
 	query(options?: IQueryOptions): TPromise<IPager<IGalleryExtension>>;
 	download(extension: IGalleryExtension): TPromise<string>;
+	reportStatistic(publisher: string, name: string, version: string, type: StatisticType): TPromise<void>;
 	getReadme(extension: IGalleryExtension): TPromise<string>;
 	getManifest(extension: IGalleryExtension): TPromise<IExtensionManifest>;
 	getChangelog(extension: IGalleryMetadata): TPromise<string>;
@@ -219,12 +233,12 @@ export interface DidInstallExtensionEvent {
 	zipPath?: string;
 	gallery?: IGalleryExtension;
 	local?: ILocalExtension;
-	error?: Error;
+	error?: string;
 }
 
 export interface DidUninstallExtensionEvent {
 	id: string;
-	error?: Error;
+	error?: string;
 }
 
 export interface IExtensionManagementService {
@@ -236,8 +250,8 @@ export interface IExtensionManagementService {
 	onDidUninstallExtension: Event<DidUninstallExtensionEvent>;
 
 	install(zipPath: string): TPromise<void>;
-	installFromGallery(extension: IGalleryExtension, promptToInstallDependencies?: boolean): TPromise<void>;
-	uninstall(extension: ILocalExtension): TPromise<void>;
+	installFromGallery(extension: IGalleryExtension): TPromise<void>;
+	uninstall(extension: ILocalExtension, force?: boolean): TPromise<void>;
 	getInstalled(type?: LocalExtensionType): TPromise<ILocalExtension[]>;
 }
 
@@ -285,7 +299,7 @@ export const IExtensionTipsService = createDecorator<IExtensionTipsService>('ext
 
 export interface IExtensionTipsService {
 	_serviceBrand: any;
-	getRecommendations(): string[];
+	getRecommendations(installedExtensions: string[], searchText: string): string[];
 	getWorkspaceRecommendations(): TPromise<string[]>;
 	getKeymapRecommendations(): string[];
 	getKeywordsForExtension(extension: string): string[];

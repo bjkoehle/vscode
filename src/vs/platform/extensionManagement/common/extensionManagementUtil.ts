@@ -5,7 +5,8 @@
 
 'use strict';
 
-import { ILocalExtension, IGalleryExtension, IExtensionManifest, EXTENSION_IDENTIFIER_REGEX } from 'vs/platform/extensionManagement/common/extensionManagement';
+import { ILocalExtension, IGalleryExtension, IExtensionManifest, EXTENSION_IDENTIFIER_REGEX, IExtensionEnablementService } from 'vs/platform/extensionManagement/common/extensionManagement';
+import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
 
 export function areSameExtensions(a: { id: string }, b: { id: string }): boolean {
 	if (a.id === b.id) {
@@ -61,6 +62,21 @@ export function getLocalExtensionTelemetryData(extension: ILocalExtension): any 
 	};
 }
 
+
+/* __GDPR__FRAGMENT__
+	"GalleryExtensionTelemetryData" : {
+		"id" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+		"name": { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+		"galleryId": { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+		"publisherId": { "classification": "PublicNonPersonalData", "purpose": "FeatureInsight" },
+		"publisherName": { "classification": "PublicNonPersonalData", "purpose": "FeatureInsight" },
+		"publisherDisplayName": { "classification": "PublicPersonalData", "purpose": "FeatureInsight" },
+		"dependencies": { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+		"${include}": [
+			"${GalleryExtensionTelemetryData2}"
+		]
+	}
+*/
 export function getGalleryExtensionTelemetryData(extension: IGalleryExtension): any {
 	return {
 		id: extension.id,
@@ -69,6 +85,28 @@ export function getGalleryExtensionTelemetryData(extension: IGalleryExtension): 
 		publisherId: extension.publisherId,
 		publisherName: extension.publisher,
 		publisherDisplayName: extension.publisherDisplayName,
-		dependencies: extension.properties.dependencies.length > 0
+		dependencies: extension.properties.dependencies.length > 0,
+		...extension.telemetryData
 	};
+}
+
+
+const BetterMergeCheckKey = 'extensions/bettermergecheck';
+export const BetterMergeDisabledNowKey = 'extensions/bettermergedisablednow';
+export const BetterMergeId = 'pprice.better-merge';
+
+/**
+ * Globally disabled extensions, taking care of disabling obsolete extensions.
+ */
+export function getGloballyDisabledExtensions(extensionEnablementService: IExtensionEnablementService, storageService: IStorageService, installedExtensions: { id: string; }[]) {
+	const globallyDisabled = extensionEnablementService.getGloballyDisabledExtensions();
+	if (!storageService.getBoolean(BetterMergeCheckKey, StorageScope.GLOBAL, false)) {
+		storageService.store(BetterMergeCheckKey, true);
+		if (globallyDisabled.indexOf(BetterMergeId) === -1 && installedExtensions.some(d => d.id === BetterMergeId)) {
+			globallyDisabled.push(BetterMergeId);
+			extensionEnablementService.setEnablement(BetterMergeId, false);
+			storageService.store(BetterMergeDisabledNowKey, true);
+		}
+	}
+	return globallyDisabled;
 }

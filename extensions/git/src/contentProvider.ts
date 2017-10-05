@@ -7,7 +7,9 @@
 
 import { workspace, Uri, Disposable, Event, EventEmitter, window } from 'vscode';
 import { debounce, throttle } from './decorators';
-import { Model } from './model';
+import { fromGitUri } from './uri';
+import { Model, ModelChangeEvent } from './model';
+import { filterEvent, eventToPromise } from './util';
 
 interface CacheRow {
 	uri: Uri;
@@ -26,17 +28,22 @@ export class GitContentProvider {
 	private onDidChangeEmitter = new EventEmitter<Uri>();
 	get onDidChange(): Event<Uri> { return this.onDidChangeEmitter.event; }
 
+	private changedRepositoryRoots = new Set<string>();
 	private cache: Cache = Object.create(null);
 	private disposables: Disposable[] = [];
 
 	constructor(private model: Model) {
 		this.disposables.push(
-			model.onDidChangeRepository(this.eventuallyFireChangeEvents, this),
-			workspace.registerTextDocumentContentProvider('git', this),
-			workspace.registerTextDocumentContentProvider('git-original', this)
+			model.onDidChangeRepository(this.onDidChangeRepository, this),
+			workspace.registerTextDocumentContentProvider('git', this)
 		);
 
 		setInterval(() => this.cleanup(), FIVE_MINUTES);
+	}
+
+	private onDidChangeRepository({ repository }: ModelChangeEvent): void {
+		this.changedRepositoryRoots.add(repository.root);
+		this.eventuallyFireChangeEvents();
 	}
 
 	@debounce(1100)
@@ -46,35 +53,50 @@ export class GitContentProvider {
 
 	@throttle
 	private async fireChangeEvents(): Promise<void> {
-		await this.model.whenIdle();
+		if (!window.state.focused) {
+			const onDidFocusWindow = filterEvent(window.onDidChangeWindowState, e => e.focused);
+			await eventToPromise(onDidFocusWindow);
+		}
 
-		Object.keys(this.cache)
-			.forEach(key => this.onDidChangeEmitter.fire(this.cache[key].uri));
+		Object.keys(this.cache).forEach(key => {
+			const uri = this.cache[key].uri;
+			const fsPath = uri.fsPath;
+
+			for (const root of this.changedRepositoryRoots) {
+				if (fsPath.startsWith(root)) {
+					this.onDidChangeEmitter.fire(uri);
+					return;
+				}
+			}
+		});
+
+		this.changedRepositoryRoots.clear();
 	}
 
 	async provideTextDocumentContent(uri: Uri): Promise<string> {
+		const repository = this.model.getRepository(uri);
+
+		if (!repository) {
+			return '';
+		}
+
 		const cacheKey = uri.toString();
 		const timestamp = new Date().getTime();
 		const cacheValue = { uri, timestamp };
 
 		this.cache[cacheKey] = cacheValue;
 
-		if (uri.scheme === 'git-original') {
-			uri = new Uri().with({ scheme: 'git', path: uri.query });
-		}
-
-		let ref = uri.query;
+		let { path, ref } = fromGitUri(uri);
 
 		if (ref === '~') {
-			const fileUri = uri.with({ scheme: 'file', query: '' });
+			const fileUri = Uri.file(path);
 			const uriString = fileUri.toString();
-			const [indexStatus] = this.model.indexGroup.resources.filter(r => r.original.toString() === uriString);
+			const [indexStatus] = repository.indexGroup.resourceStates.filter(r => r.original.toString() === uriString);
 			ref = indexStatus ? '' : 'HEAD';
 		}
 
 		try {
-			const result = await this.model.show(ref, uri);
-			return result;
+			return await repository.show(ref, path);
 		} catch (err) {
 			return '';
 		}
@@ -86,7 +108,7 @@ export class GitContentProvider {
 
 		Object.keys(this.cache).forEach(key => {
 			const row = this.cache[key];
-			const isOpen = window.visibleTextEditors.some(e => e.document.uri.fsPath === row.uri.fsPath);
+			const isOpen = window.visibleTextEditors.some(e => e.document.toString() === row.uri.toString());
 
 			if (isOpen || now - row.timestamp < THREE_MINUTES) {
 				cache[row.uri.toString()] = row;

@@ -22,15 +22,15 @@ import { IEditorGroupService } from 'vs/workbench/services/group/common/groupSer
 import { IContextMenuService } from 'vs/platform/contextview/browser/contextView';
 import { IKeybindingService } from 'vs/platform/keybinding/common/keybinding';
 import { IEditorGroup, IEditorStacksModel } from 'vs/workbench/common/editor';
-import { OpenEditor } from 'vs/workbench/parts/files/common/explorerViewModel';
-import { ContributableActionProvider } from 'vs/workbench/browser/actionBarRegistry';
+import { OpenEditor } from 'vs/workbench/parts/files/common/explorerModel';
+import { ContributableActionProvider } from 'vs/workbench/browser/actions';
 import { explorerItemToFileResource } from 'vs/workbench/parts/files/common/files';
 import { ITextFileService, AutoSaveMode } from 'vs/workbench/services/textfile/common/textfiles';
 import { IWorkbenchEditorService } from 'vs/workbench/services/editor/common/editorService';
 import { EditorStacksModel, EditorGroup } from 'vs/workbench/common/editor/editorStacksModel';
-import { SaveFileAction, RevertFileAction, SaveFileAsAction, OpenToSideAction, SelectResourceForCompareAction, CompareResourcesAction, SaveAllInGroupAction } from 'vs/workbench/parts/files/browser/fileActions';
+import { SaveFileAction, RevertFileAction, SaveFileAsAction, OpenToSideAction, SelectResourceForCompareAction, CompareResourcesAction, SaveAllInGroupAction, CompareWithSavedAction } from 'vs/workbench/parts/files/browser/fileActions';
 import { IUntitledEditorService } from 'vs/workbench/services/untitled/common/untitledEditorService';
-import { CloseOtherEditorsInGroupAction, CloseEditorAction, CloseEditorsInGroupAction } from 'vs/workbench/browser/parts/editor/editorActions';
+import { CloseOtherEditorsInGroupAction, CloseEditorAction, CloseEditorsInGroupAction, CloseUnmodifiedEditorsInGroupAction } from 'vs/workbench/browser/parts/editor/editorActions';
 
 const $ = dom.$;
 
@@ -170,8 +170,7 @@ export class Controller extends DefaultController {
 		@IWorkbenchEditorService private editorService: IWorkbenchEditorService,
 		@IEditorGroupService private editorGroupService: IEditorGroupService,
 		@IContextMenuService private contextMenuService: IContextMenuService,
-		@ITelemetryService private telemetryService: ITelemetryService,
-		@IKeybindingService private keybindingService: IKeybindingService
+		@ITelemetryService private telemetryService: ITelemetryService
 	) {
 		super({ clickBehavior: ClickBehavior.ON_MOUSE_DOWN, keyboardSupport: false });
 	}
@@ -257,11 +256,10 @@ export class Controller extends DefaultController {
 		const group = element instanceof EditorGroup ? element : (<OpenEditor>element).editorGroup;
 		const editor = element instanceof OpenEditor ? (<OpenEditor>element).editorInput : undefined;
 
-		let anchor = { x: event.posx + 1, y: event.posy };
+		let anchor = { x: event.posx, y: event.posy };
 		this.contextMenuService.showContextMenu({
 			getAnchor: () => anchor,
 			getActions: () => this.actionProvider.getSecondaryActions(tree, element),
-			getKeyBinding: (action) => this.keybindingService.lookupKeybinding(action.id),
 			onHide: (wasCancelled?: boolean) => {
 				if (wasCancelled) {
 					tree.DOMFocus();
@@ -275,6 +273,12 @@ export class Controller extends DefaultController {
 
 	public openEditor(element: OpenEditor, options: { preserveFocus: boolean; pinned: boolean; sideBySide: boolean; }): void {
 		if (element) {
+			/* __GDPR__
+				"workbenchActionExecuted" : {
+					"id" : { "classification": "SystemMetaData", "purpose": "FeatureInsight" },
+					"from": { "classification": "SystemMetaData", "purpose": "FeatureInsight" }
+				}
+			*/
 			this.telemetryService.publicLog('workbenchActionExecuted', { id: 'workbench.files.openFile', from: 'openEditors' });
 			let position = this.model.positionOfGroup(element.editorGroup);
 			if (options.sideBySide && position !== Position.THREE) {
@@ -334,6 +338,7 @@ export class ActionProvider extends ContributableActionProvider {
 
 		return [
 			saveAllAction,
+			this.instantiationService.createInstance(CloseUnmodifiedEditorsInGroupAction, CloseUnmodifiedEditorsInGroupAction.ID, CloseUnmodifiedEditorsInGroupAction.LABEL),
 			this.instantiationService.createInstance(CloseEditorsInGroupAction, CloseEditorsInGroupAction.ID, CloseEditorsInGroupAction.LABEL)
 		];
 	}
@@ -352,6 +357,7 @@ export class ActionProvider extends ContributableActionProvider {
 					result.push(new Separator());
 				}
 
+				result.push(this.instantiationService.createInstance(CloseUnmodifiedEditorsInGroupAction, CloseUnmodifiedEditorsInGroupAction.ID, nls.localize('closeAllUnmodified', "Close Unmodified")));
 				result.push(this.instantiationService.createInstance(CloseEditorsInGroupAction, CloseEditorsInGroupAction.ID, nls.localize('closeAll', "Close All")));
 			} else {
 				const openEditor = <OpenEditor>element;
@@ -395,6 +401,14 @@ export class ActionProvider extends ContributableActionProvider {
 
 					// Compare Actions
 					result.push(new Separator());
+
+					if (!openEditor.isUntitled()) {
+						const compareWithSavedAction = this.instantiationService.createInstance(CompareWithSavedAction, CompareWithSavedAction.ID, nls.localize('compareWithSaved', "Compare with Saved"));
+						compareWithSavedAction.setResource(resource);
+						compareWithSavedAction.enabled = openEditor.isDirty();
+						result.push(compareWithSavedAction);
+					}
+
 					const runCompareAction = this.instantiationService.createInstance(CompareResourcesAction, resource, tree);
 					if (runCompareAction._isEnabled()) {
 						result.push(runCompareAction);
@@ -408,6 +422,7 @@ export class ActionProvider extends ContributableActionProvider {
 				const closeOtherEditorsInGroupAction = this.instantiationService.createInstance(CloseOtherEditorsInGroupAction, CloseOtherEditorsInGroupAction.ID, nls.localize('closeOthers', "Close Others"));
 				closeOtherEditorsInGroupAction.enabled = openEditor.editorGroup.count > 1;
 				result.push(closeOtherEditorsInGroupAction);
+				result.push(this.instantiationService.createInstance(CloseUnmodifiedEditorsInGroupAction, CloseUnmodifiedEditorsInGroupAction.ID, nls.localize('closeAllUnmodified', "Close Unmodified")));
 				result.push(this.instantiationService.createInstance(CloseEditorsInGroupAction, CloseEditorsInGroupAction.ID, nls.localize('closeAll', "Close All")));
 			}
 
